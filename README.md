@@ -265,9 +265,9 @@ Three answers, not two. `achieved: false` means the robot did not reach the goal
 measured it. These must never look the same to you.
 
 **If you send no goals, the service reads them from `task_analyzers`.** Your deterministic analyzers
-already ARE your success criteria — they are what your own tests grade the run against —  so a task
-file that you already have gives real goals with no change. `lift_height.min_lift_z` becomes
-`object_lifted`; `place_success.target_xy` and `place_tol` become `object_at`.
+already ARE your success criteria: they are what your own tests grade the run against. Thus a task
+file that you have today gives you real goals, with no change. `lift_height.min_lift_z` becomes
+`object_lifted`. `place_success.target_xy` and `place_tol` become `object_at`.
 
 If there are no goals and no analyzers, the service uses one default: `object_lifted` with
 `min_rise_m: 0.05`.
@@ -369,8 +369,8 @@ send them again.
 | `ESCALATED` | The action was `hardware` or `environment`, and a person had to act. |
 | `THRASH` | You tried a fix and it did not work. |
 
-**Report `THRASH` too.** It tells the service which fix does not work, which is as useful as a fix
-that does: the next agent that meets this failure is told not to try it.
+**Report `THRASH` too.** It tells the service which fix does NOT work. That is as useful as a fix
+that does, because the next agent that meets this failure is told not to try it.
 
 You cannot read the lessons back, and you do not need to. The service applies them inside
 `POST /v1/diagnose` and returns what it found in `feedback`.
@@ -386,8 +386,8 @@ its timeout as well. This is the most frequent problem in a first integration.
 ## For your coding agent
 
 If an agent does the repair for you, give it [`skill/shl-repair-loop/`](skill/shl-repair-loop/). It
-is the loop discipline around this API: read the action before you touch any code, use the measured
-correction, never repeat a fix that already failed, verify by a new run, and always report the
+is the loop discipline around this API. Read the action before you touch any code. Use the measured
+correction. Never repeat a fix that already failed. Verify with a new run. Always report the
 outcome.
 
 ```bash
