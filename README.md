@@ -29,6 +29,8 @@ Two more that you meet later:
 
 | term | meaning |
 |---|---|
+| **task type** | The kind of task the robot did. The service measures each kind differently. |
+| **goal** | One condition that the run had to reach for the task to be a success. |
 | **policy** | Your source code that controls the robot. You can send it, and then the service gives the cause in terms of your actual code. |
 | **lesson** | What the service learned from one failure that somebody resolved. The service applies lessons for you. You do not manage them. |
 
@@ -50,17 +52,19 @@ your token, call a `/v1` route. A 401 or a 403 is a problem with your token, not
 
 ## 3. Your first diagnosis
 
-This example sends a small feature set. Copy it exactly.
+Telemetry goes in one field: `record`. Copy this exactly.
 
 ```bash
 curl -s $SHL_URL/v1/diagnose \
   -H "Authorization: Bearer $SHL_TOKEN" \
   -H 'content-type: application/json' \
   -d '{
-    "features": {"global": {
-      "tool_converged": true, "converged_but_no_load": true, "load_appeared": false,
-      "fingertip_gap_above_box_m": 0.063
-    }},
+    "record": {
+      "meta": {"task": "box_lift", "task_type": "pick_and_place", "control_dt": 0.02},
+      "t":               [0.0, 0.02, 0.04],
+      "joint_track_err": [0.01, 0.02, 0.09],
+      "grip_cmd":        [0.0, 255.0, 255.0]
+    },
     "task_spec": "Lift the box off the table."
   }'
 ```
@@ -75,9 +79,11 @@ You get a `diagnosis` object:
     "root_cause": "The tool went to its commanded position, but no load appeared...",
     "action": "code",
     "fix_direction": "Lower the grasp target by approximately 0.063 m.",
-    "evidence": [{"signal": "fingertip_gap_above_box_m", "reading": "0.063 m"}],
-    "confidence": 0.95
+    "evidence": [{"signal": "fingertip_gap_above_object_m", "reading": "0.063 m"}],
+    "confidence": 0.95,
+    "alternatives": []
   },
+  "warnings": [],
   "response_id": "0f3c9a1b2d4e5f60"
 }
 ```
@@ -91,38 +97,97 @@ You get a `diagnosis` object:
 | `hardware` | NO change to your program will correct this. Stop. Tell a person. |
 | `environment` | NO change to your program will correct this. Stop. Tell a person. |
 
-Keep the `response_id`. You send it back in step 6.
+Keep the `response_id`. You send it back in step 8.
+
+### More than one cause
+
+Sometimes the telemetry does not separate two causes. The service then puts the most likely cause in
+the main fields and lists the others in `alternatives`, most likely first:
+
+```jsonc
+"confidence": 0.55,
+"alternatives": [
+  {"category": "grasp", "subtype": "geometry_miss", "confidence": 0.4,
+   "reason": "the target may have been correct and the fingers still closed above the object; a value for fingertip_gap_above_object_m would show which"}
+]
+```
+
+Read this before you change any code. If the main confidence is low and the first alternative is
+near to it, make the change that is correct for **both** causes. The `reason` also tells you which
+channel to add, so that the next failure of this type is not ambiguous.
+
+The service builds `feedback` and `patch` for the main diagnosis only. An empty list means that one
+cause agrees with the evidence.
 
 ## 4. Send your own telemetry
 
-In step 3 you sent a feature set. Usually you send the raw telemetry as `record` instead, and the
-service calculates the feature set for you.
-
-A record holds one array for each measurement, with one value at each step:
+A record holds one array for each measurement, with one value at each step. **This is every field
+that the service accepts.** Send the ones that your robot produces and leave out the rest.
 
 ```jsonc
 {
   "record": {
-    "meta": {"task": "box_lift", "control_dt": 0.02},
-    "t":               [0.0, 0.02, 0.04],       // one value for each step
-    "grip_cmd":        [0.0, 0.0, 255.0],       // gripper close command, 0 to 255
-    "joint_track_err": [0.01, 0.02, 0.28],      // radians
-    "ctrl":            [[0,0,0,0,0,0], "..."],  // one row for each STEP
-    "ctrl_range":      [[-3.14, 3.14], "..."]   // one row for each ACTUATOR
+    "meta": {
+      "task":             "box_lift",          // [CORE] your name for this task. Any text.
+      "task_type":        "pick_and_place",    // [CORE] the KIND of task. See section 5.
+      "rig":              "UR5e + Robotiq 2F-85",  // [CORE] your name for the arm and the tool
+      "control_dt":       0.02,                // [CORE] seconds for each step. More than zero.
+      "n_arm_joints":     6,                   // [CORE] for information only
+      "rated_torque":     [150, 150, 150, 28, 28, 28],  // [DERIVED] N·m for each joint
+      "workspace_radius": 0.85,                // [DERIVED] metres. 'out_of_reach' needs it.
+      "finger_offset":    0.115,               // [DERIVED] tool frame to fingertips, metres
+      "object_half_z":    0.025                // [INSTRUMENTED] half the object height, metres
+    },
+
+    // --- CORE: what every robot reports ------------------------------------------------
+    "t":               [0.0, 0.02, 0.04],      // seconds. It must increase at each step.
+    "qpos":            [[0,0,0,0,0,0], "..."], // measured joint positions, radians
+    "qvel":            [[0,0,0,0,0,0], "..."], // joint speeds, radians a second
+    "ctrl":            [[0,0,0,0,0,0], "..."], // the command you APPLIED. One row for each STEP.
+    "target":          [[0,0,0,0,0,0], "..."], // the command you ASKED for, radians
+    "ctrl_range":      [[-3.14, 3.14], "..."], // actuator limits. One row for each ACTUATOR.
+    "joint_track_err": [0.01, 0.02, 0.28],     // radians. ONE value for each step, not each joint.
+    "grip_cmd":        [0.0, 0.0, 255.0],      // gripper close command, 0 to 255. 128 or more = close.
+
+    // --- DERIVED: what you calculate with your model of the robot ----------------------
+    "qacc":            [[0,0,0,0,0,0], "..."], // joint accelerations
+    "residual":        [1.2, 1.3, 41.0],       // load torque, N·m. Read the note below.
+    "baseline_residual": [1.2, 1.3, 1.4],      // the same run with an EMPTY gripper
+    "sigma_min":       [0.11, 0.09, 0.002],    // smallest singular value of the tool Jacobian
+    "cond":            [12.0, 18.0, 340.0],    // condition number of the same Jacobian
+    "dq_pinned":       [0.0, 0.0, 1.0],        // 0 or 1: was the commanded joint step at its limit
+    "finger_gap":      [0.085, 0.085, 0.004],  // metres between the fingers
+    "tool_xyz":        [[0.4, 0.0, 0.30], "..."],  // tool frame position, metres, from forward kinematics
+    "tool_target_err": [0.31, 0.12, 0.004],    // metres from the tool to its commanded position
+
+    // --- INSTRUMENTED: a force sensor, a known payload mass, or a simulator ------------
+    "torque_ratio": 0.41,                      // ONE number, not one for each step
+    "contact": {
+      "ncon":           [2, 2, 4],             // number of contacts. Accepted, not used.
+      "pad_normal":     [0.0, 0.0, 180.0],     // newtons at the gripper pads
+      "pad_tangential": [0.0, 0.0, 20.0],      // newtons across the pads. With pad_normal: slip.
+      "object_support": [30.0, 30.0, 0.0],     // newtons between the object and the surface below it
+      "unexpected_pairs": [[], [], ["gripper|wall"]]  // your own list, one row for each step
+    },
+    "oracle": {
+      "object_xyz":  [[0.4, 0.0, 0.025], "..."],  // TRUE object position, metres
+      "detected_xy": [[0.4, 0.0], "..."],         // what YOUR perception reported
+      "object_quat": [[1, 0, 0, 0], "..."]        // true orientation, wxyz. Accepted, not used.
+    }
   }
 }
 ```
 
-Two worked examples, ready to download:
+Every field is optional, including `meta`. The service does not need a fixed set: it calculates the
+signals that your data supports and reports the rest as `null`.
+
+Three worked examples, ready to download:
 
 | file | what it is |
 |---|---|
 | [`record.min.json`](https://docs.squarehammerlabs.com/examples/record.min.json) | The least that still gives a diagnosis. 12 steps, CORE tier only. |
 | [`record.full.json`](https://docs.squarehammerlabs.com/examples/record.full.json) | A real 645-step failure: a payload that lifts, then slips. All tiers. |
-| [`bundle.example.json`](https://docs.squarehammerlabs.com/examples/bundle.example.json) | The feature set for that record, if you prefer to send `features`. |
-
-Every field is optional. Send the data that you have. An absent channel is not an error: the signals
-that use it become `null`, and the failure categories that need those signals become unavailable.
+| [`bundle.example.json`](https://docs.squarehammerlabs.com/examples/bundle.example.json) | The feature set that the service calculated from that record. Read it to see what the service gets from what you send. |
 
 ### What each channel costs you
 
@@ -145,24 +210,129 @@ Three of these need a clear statement:
 - **`oracle.*` is ground truth.** A production robot usually cannot supply it. Send it from a
   simulator or a motion-capture system, or do not send it.
 
-### Two mistakes that the service rejects
+## 5. Say what the task was, and what success meant
 
-The service answers 422 and names the field. It does not guess.
+### The task type
 
-1. **`ctrl_range` has one row for each ACTUATOR.** Every other list of lists in a record has one row
-   for each STEP. This is the most frequent mistake.
-2. **Rows must be complete.** `tool_xyz` needs all three of x, y and z in each row.
+A robot arm does many things, and the service measures each kind differently. "The object left the
+table" means nothing for a screwdriver that drives a screw. Thus the task says which kind it is, in
+`meta.task_type`:
 
-Different channel lengths are **not** an error. The service tells you in `warnings` and still gives
-you a diagnosis. Some signals are then calculated over fewer steps than you sent.
+| `task_type` | what you get |
+|---|---|
+| `pick_and_place` | Everything. The phases, the grasp geometry, the lift, and the movement of the object. This is the one kind that the service measures fully today. |
+| `insert`, `press`, `pour`, `wipe` | The service accepts these names but does not measure them yet. You get the signals that describe the ARM: tracking error, actuator saturation, Jacobian conditioning, load torque, and timing. The response lists the signals that are absent. |
+| any other text | The same as the row above, with a warning that says the name is not known. |
+| you send nothing | The service reads the run as `pick_and_place` and tells you so in `warnings`. |
 
-## 5. Get the cause in terms of your code
+The signals that describe the arm are calculated for **every** task type. A screwdriver saturates an
+actuator in the same way as a gripper.
+
+### The goals
+
+A goal is one condition that the run had to reach. Send the goals in `task_yaml` and the service
+tells you which ones the robot reached, with the value that decided each one:
+
+```yaml
+task_spec:
+  inline: Lift the box off the table and put it in the bin.
+task_type: pick_and_place
+goals:
+  - object_lifted: {min_rise_m: 0.12}
+  - object_at: {xy: [0.5, 0.1], tol_m: 0.03}
+```
+
+```jsonc
+"goals": {"source": "task", "achieved": "1/2", "items": [
+  {"name": "object_lifted", "achieved": true,
+   "reading": "the object rose 0.200 m; the goal needs 0.120 m"},
+  {"name": "object_at", "achieved": false,
+   "reading": "the object stopped 0.412 m from the target; the goal allows 0.030 m"}
+]}
+```
+
+The four goals for `pick_and_place`:
+
+| goal | parameters | it is reached when |
+|---|---|---|
+| `object_lifted` | `min_rise_m` | the object rose that far above where it started |
+| `object_at` | `xy`, `tol_m` | the object stopped inside that distance of that point |
+| `object_moved` | `min_m` | the object moved that far across the surface |
+| `object_released` | none | the gripper opened again after it closed |
+
+Three answers, not two. `achieved: false` means the robot did not reach the goal.
+`achieved: null` means that your record does not carry the channel the goal needs, thus nobody
+measured it. These must never look the same to you.
+
+**If you send no goals, the service reads them from `task_analyzers`.** Your deterministic analyzers
+already ARE your success criteria — they are what your own tests grade the run against —  so a task
+file that you already have gives real goals with no change. `lift_height.min_lift_z` becomes
+`object_lifted`; `place_success.target_xy` and `place_tol` become `object_at`.
+
+If there are no goals and no analyzers, the service uses one default: `object_lifted` with
+`min_rise_m: 0.05`.
+
+## 6. The schema
+
+### What the service accepts
+
+Section 4 shows every field. The machine-readable contract is the OpenAPI document:
+
+```bash
+curl -s https://docs.squarehammerlabs.com/openapi.json
+```
+
+Generate a client from it. Do not write the request shapes by hand.
+
+### How the service enforces it
+
+The service refuses a record that it cannot read, and it names the field. It does not guess.
+
+| what you send | what you get |
+|---|---|
+| `ctrl_range` with one row for each STEP | **422.** It has one row for each ACTUATOR. Every other list of lists has one row for each step. This is the most frequent mistake. |
+| a row that is too short (`tool_xyz` with x and y only) | **422** naming the field and the row |
+| `NaN` or `Infinity` in any channel | **422** naming the channel. These are not measurements, and one of them makes every value calculated from that channel meaningless. |
+| `meta.control_dt` of zero or less | **422**. The service divides by it. |
+| more than 200000 steps in one channel | **422** |
+| a body of more than 32 MB | **413**. Send one run for each call. |
+| a record with no per-step channel | **422**. There is nothing to diagnose. |
+
+Some conditions are recoverable. The service reports these in `warnings` and still gives you a
+diagnosis:
+
+- **Channels with different lengths.** Some signals are then calculated over fewer steps than you
+  sent.
+- **A `grip_cmd` that never reaches 128.** Your gripper is probably on a scale of 0 to 1. Multiply
+  it by 255: without this, the service sees a gripper that never closed and every phase statistic
+  becomes unavailable.
+- **A `t` that does not increase, or that has a gap.** Steps are missing, thus each duration is
+  measured across them.
+- **A run of one step.** No trend, phase or rate can be calculated from it.
+
+Read `warnings` on every response. An empty list means that your record is correct.
+
+### How the schema changes
+
+Inside `/v1`, changes are **additive only**:
+
+- New optional fields can appear. Your integration continues to work.
+- A name is never used again with a different meaning.
+- A field is never removed, and an optional field never becomes necessary.
+- Unknown fields that you send are accepted and ignored. They are not stored and not read, thus do
+  not use them to carry your own data.
+- A change that breaks any of the rules above becomes `/v2`. Your `/v1` calls continue to work.
+
+We tell you before a new optional field appears in a response. Write your client to ignore fields
+that it does not know.
+
+## 7. Get the cause in terms of your code
 
 Add your source code as `policy` and the service reads it:
 
 ```jsonc
 {
-  "features": { "global": {"...": "..."} },
+  "record": { "...": "your telemetry" },
   "policy": {"files": [{"path": "policy.py", "content": "GRASP_Z = 0.21\n..."}]},
   "coding_agent": {"mode": "shl"}
 }
@@ -179,7 +349,7 @@ The service never runs your code. You apply the change, you run it, and you repo
 Send only the files that a fix can change, and the files it reads. Do not send your whole system,
 and never send credentials.
 
-## 6. Report what happened — always
+## 8. Report what happened — always
 
 This is the step that makes the service improve. Send the `response_id` from step 3 and what you did:
 
@@ -205,13 +375,30 @@ that does: the next agent that meets this failure is told not to try it.
 You cannot read the lessons back, and you do not need to. The service applies them inside
 `POST /v1/diagnose` and returns what it found in `feedback`.
 
-## 7. Timeouts
+## 9. Timeouts
 
-Most calls answer in seconds. Two paths are slow, because they run a language model while you wait:
-`coding_agent.mode="shl"`, and `multi_vlm_analysis` with several models.
+Most calls answer in seconds. One path is slow, because it runs a language model while you wait:
+`coding_agent.mode="shl"`, which writes the patch.
 
 Set your client timeout to 180 seconds or more. If you put a proxy in front of the service, raise
 its timeout as well. This is the most frequent problem in a first integration.
+
+## For your coding agent
+
+If an agent does the repair for you, give it [`skill/shl-repair-loop/`](skill/shl-repair-loop/). It
+is the loop discipline around this API: read the action before you touch any code, use the measured
+correction, never repeat a fix that already failed, verify by a new run, and always report the
+outcome.
+
+```bash
+# Claude Code
+cp -r skill/shl-repair-loop .claude/skills/
+# Cursor
+cp -r skill/shl-repair-loop .cursor/skills/
+```
+
+Then open [`SKILL.md`](skill/shl-repair-loop/SKILL.md) and complete the four lines in "Your system".
+They tell the agent how to get telemetry from your robot and how to run the task again.
 
 ## Try it
 
