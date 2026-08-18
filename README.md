@@ -444,7 +444,13 @@ system, or a fixed overhead camera with a one-time calibration. The service trea
 oracle and a simulator oracle identically.
 
 **When you cannot fill it**, the goal comes back `achieved: null` with a reading that says the
-quantity was never measured — not `false`. The diagnosis still runs on everything else.
+quantity was never measured, not `false`. The diagnosis still runs on everything else.
+
+**With a camera and nothing else**, use `POST /v1.1/diagnose`. It accepts the same body plus
+`frames`, up to 8 camera images from the run, and `verification: {"mode": "vlm"}`. A model then
+grades the goals that the telemetry could not grade, from your frames. Each goal in the response
+names what decided it in `graded_by`: `telemetry` or `vlm`. A model verdict never replaces a
+telemetry verdict. The two new fields are experimental and can change.
 
 ## For your coding agent
 
