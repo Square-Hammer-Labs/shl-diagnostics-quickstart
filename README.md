@@ -136,7 +136,20 @@ that the service accepts.** Send the ones that your robot produces and leave out
       "rated_torque":     [150, 150, 150, 28, 28, 28],  // [DERIVED] N·m for each joint
       "workspace_radius": 0.85,                // [DERIVED] metres. 'out_of_reach' needs it.
       "finger_offset":    0.115,               // [DERIVED] tool frame to fingertips, metres
-      "object_half_z":    0.025                // [INSTRUMENTED] half the object height, metres
+      "object_half_z":    0.025,               // [INSTRUMENTED] half the object height, metres
+
+      // [CORE] describe your robot, and the service scales its thresholds to YOUR arm.
+      // Known models (ur5e, ur10e, franka_fr3, franka_panda, xarm6, xarm7) fill the fields
+      // that you omit. Send the limits of the robot AS IT RUNS NOW, not the datasheet:
+      // a changed joint limit is itself a diagnostic signal.
+      "robot": {
+        "model":           "ur5e",
+        "n_arm_joints":    6,
+        "rated_torque_nm": [150, 150, 150, 28, 28, 28],
+        "jnt_range":       [[-6.28, 6.28], [-6.28, 6.28], [-3.14, 3.14],
+                            [-6.28, 6.28], [-6.28, 6.28], [-6.28, 6.28]],
+        "gripper":         {"model": "robotiq_2f85"}   // or cmd_range + close_direction
+      }
     },
 
     // --- CORE: what every robot reports ------------------------------------------------
