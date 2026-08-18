@@ -396,6 +396,56 @@ Most calls answer in seconds. One path is slow, because it runs a language model
 Set your client timeout to 180 seconds or more. If you put a proxy in front of the service, raise
 its timeout as well. This is the most frequent problem in a first integration.
 
+## Isaac Sim
+
+The service reads telemetry, not simulators. Isaac Sim already produces every field the record
+needs. [`examples/isaac_sim_adapter.py`](examples/isaac_sim_adapter.py) shows the mapping, source
+by source:
+
+| Isaac Sim source | record field |
+|---|---|
+| `Articulation.get_joint_positions()` / `get_joint_velocities()` | `qpos`, `qvel` |
+| `Articulation.get_measured_joint_efforts()` | `residual` (send `baseline_residual` from an empty-gripper run on the same path) |
+| the joint targets you apply each step | `ctrl`, `target`, `joint_track_err` |
+| `Articulation.get_jacobians()` → numpy SVD | `sigma_min`, `cond` |
+| the tool frame prim's world transform | `tool_xyz` |
+| **any USD prim's world transform** | `oracle.object_xyz` |
+
+The last row is the important one. Your ground truth is a prim value: one `XformCache` read for
+each step gives the service the true position of the part, and that grades the outcome goals
+(`object_lifted`, `object_still_held`, `object_at`). You do not need our harness for this.
+
+[`examples/isaac_record.json`](examples/isaac_record.json) is a record in exactly that shape — a
+60-step pick that descends, closes, and lifts a part 0.18 m. It is synthetic and marked as such in
+`meta.note`; send it to `/v1/diagnose` to see the full response before you wire your own scene.
+
+## Rust and other languages
+
+The API is plain HTTP and JSON. There is no client library to install. Call it from Rust with
+`reqwest` and `serde_json` the same way the Python examples call it with `urllib`: one POST with a
+bearer token. To generate typed bindings, point your generator at the machine-readable contract:
+[`https://docs.squarehammerlabs.com/openapi.json`](https://docs.squarehammerlabs.com/openapi.json).
+
+## Verify a real run without a simulator
+
+On real hardware there is no simulator to say where the object went. What still works, and what
+needs a source you supply:
+
+**Works with no oracle at all.** Every signal in the CORE and DERIVED tiers comes from the robot
+itself: tracking error, actuator saturation, Jacobian conditioning, timing, tool convergence, and —
+with `residual` + `baseline_residual` — the load story: did a load appear when the gripper closed,
+did it persist, did it vanish mid-move. "The gripper closed on nothing" and "the payload slipped at
+step 310" are proprioceptive verdicts. They need no camera and no simulator.
+
+**Needs a position source you choose.** The outcome goals (`object_lifted`, `object_at`,
+`object_still_held`) grade the true object position. `oracle.object_xyz` is the field; who fills it
+is your call: your perception stack (send what it reports, in metres, world frame), a motion-capture
+system, or a fixed overhead camera with a one-time calibration. The service treats a customer
+oracle and a simulator oracle identically.
+
+**When you cannot fill it**, the goal comes back `achieved: null` with a reading that says the
+quantity was never measured — not `false`. The diagnosis still runs on everything else.
+
 ## For your coding agent
 
 If an agent does the repair for you, give it [`skill/shl-repair-loop/`](skill/shl-repair-loop/). It
