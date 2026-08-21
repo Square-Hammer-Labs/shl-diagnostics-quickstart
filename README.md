@@ -419,6 +419,43 @@ each step gives the service the true position of the part, and that grades the o
 60-step pick that descends, closes, and lifts a part 0.18 m. It is synthetic and marked as such in
 `meta.note`; send it to `/v1/diagnose` to see the full response before you wire your own scene.
 
+## ROS 2
+
+There is no bridge to install. The service reads JSON over HTTP, and ROS 2 already records
+everything the service needs. The flow is two commands:
+
+```bash
+ros2 bag record /joint_states /your/command/topic /your/gripper/topic /your/camera/topic
+```
+
+on the robot, then, on any machine, with no ROS 2 installation:
+
+```bash
+pip install rosbags
+python ros2_bag_to_record.py <bag_dir> --task my_task --robot-model ur10e -o record.json
+```
+
+[`examples/ros2_bag_to_record.py`](examples/ros2_bag_to_record.py) reads the bag (both .mcap and
+.db3 storage) and writes the record, ready to POST. The mapping, topic by topic:
+
+| ROS 2 source | message type | record field |
+|---|---|---|
+| `/joint_states` | sensor_msgs/JointState | `t`, `qpos`, `qvel`; `effort` becomes `residual` |
+| your command topic | JointTrajectory or Float64MultiArray | `target`, `ctrl`, `joint_track_err` |
+| your gripper topic | Float64 or GripperCommand | `grip_cmd` |
+| a tool pose topic | PoseStamped | `tool_xyz` |
+| a perception topic | PoseStamped | `oracle.object_xyz` |
+| a camera topic | CompressedImage | frames for `POST /v1.1/diagnose` |
+
+`/joint_states` alone buys the CORE tier: the kinematics and planning signals. Each other topic
+adds its channel; a topic you do not have is left out, and the service says which signals that
+cost you. The timeline is `/joint_states`; other topics are resampled onto it by last known
+value.
+
+Two notes. For `residual`, record a second bag of the same trajectory with an empty gripper and
+convert it too; send it as the baseline. And `sigma_min` is absent on purpose, because the
+Jacobian needs your kinematic model; the diagnosis works without it.
+
 ## Rust and other languages
 
 The API is plain HTTP and JSON. There is no client library to install. Call it from Rust with
