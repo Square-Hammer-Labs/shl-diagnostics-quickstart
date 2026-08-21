@@ -445,7 +445,7 @@ python ros2_bag_to_record.py <bag_dir> --task my_task --robot-model ur10e -o rec
 | your gripper topic | Float64 or GripperCommand | `grip_cmd` |
 | a tool pose topic | PoseStamped | `tool_xyz` |
 | a perception topic | PoseStamped | `oracle.object_xyz` |
-| a camera topic | CompressedImage | frames for `POST /v1.1/diagnose` |
+| a camera topic | CompressedImage | frames for `POST /v1/diagnose` |
 
 `/joint_states` alone buys the CORE tier: the kinematics and planning signals. Each other topic
 adds its channel; a topic you do not have is left out, and the service says which signals that
@@ -483,7 +483,7 @@ oracle and a simulator oracle identically.
 **When you cannot fill it**, the goal comes back `achieved: null` with a reading that says the
 quantity was never measured, not `false`. The diagnosis still runs on everything else.
 
-**With a camera and nothing else**, use `POST /v1.1/diagnose`. It accepts the same body plus
+**With a camera and nothing else**, use `POST /v1/diagnose`. It accepts the same body plus
 `frames`, up to 8 camera images from the run, and `verification: {"mode": "vlm"}`. A model then
 grades the goals that the telemetry could not grade, from your frames. Each goal in the response
 names what decided it in `graded_by`: `telemetry` or `vlm`. A model verdict never replaces a

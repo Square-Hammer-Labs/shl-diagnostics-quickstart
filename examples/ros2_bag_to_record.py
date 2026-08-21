@@ -21,7 +21,7 @@ The mapping, topic by topic:
     gripper topic       Float64 | GripperCommand           grip_cmd
     tool pose topic     PoseStamped                        tool_xyz
     perception topic    PoseStamped                        oracle.object_xyz
-    camera topic        CompressedImage                    frames for POST /v1.1/diagnose
+    camera topic        CompressedImage                    frames for POST /v1/diagnose
 
 The timeline is /joint_states. Every other topic is resampled onto it by last known value. A
 topic you do not have is simply left out; the service degrades one channel at a time and tells
@@ -198,7 +198,7 @@ def assemble(bag: dict[str, list], args) -> tuple[dict, list[dict]]:
         rec["meta"]["control_dt"] = round(statistics.median(
             b - a for a, b in zip(rec["t"], rec["t"][1:])), 6)
 
-    # camera: N frames spread across the run, ready for POST /v1.1/diagnose
+    # camera: N frames spread across the run, ready for POST /v1/diagnose
     frames = []
     cam = bag.get(args.camera_topic) or []
     if cam and args.frames > 0:
@@ -248,7 +248,7 @@ def main(argv=None) -> None:
     if frames:
         Path(args.frames_out).write_text(json.dumps(frames))
         print(f"wrote {args.frames_out}: {len(frames)} frames "
-              f"(add as 'frames' to POST /v1.1/diagnose)")
+              f"(add as 'frames' to POST /v1/diagnose)")
 
 
 if __name__ == "__main__":
